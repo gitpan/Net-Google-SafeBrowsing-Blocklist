@@ -55,8 +55,9 @@ use Digest::MD5;
 use URI;
 use URI::Escape;
 use File::stat;
+use Math::BigInt 1.87;
 use Exporter;
-our $VERSION = '1.01';
+our $VERSION = '1.02';
 our @ISA = qw(Exporter);
 
 our $MAJORVERSION  = '__MAJOR__';
@@ -74,9 +75,6 @@ our %EXPORT_TAGS = (all => \@EXPORT_OK);
 
 
 # Take a string and return a URI object.
-# Note: This doesn't fully canonicalize according to 
-# http://code.google.com/apis/safebrowsing/reference.html. It doesn't handle the
-# IP address conversions, and ".." and "." in paths are handled elsewhere.
 sub escaped_uri {
   my ($uristr) = @_;
   my $unesc;
@@ -84,6 +82,66 @@ sub escaped_uri {
     $uristr = $unesc;
   }
   return URI->new($unesc)->canonical;
+}
+
+sub canonicalized_ip {
+  my ($host) = @_;
+  use integer;
+  my @parts = split(/\.+/, $host);
+  if (@parts > 4) {
+    return undef;
+  }
+  my @ip;
+  for (my $i = 0; $i < @parts; ++$i) {
+    # length checks above are just sanity checks on the string length. Check the
+    # actual value with Math::BigInt.
+    my $n;
+    if ($parts[$i] =~ /^0x([a-fA-F0-9]+)$/) {
+      my $val = substr($1, -9);
+      $n = Math::BigInt->new('0x' . $val);
+    } elsif ($parts[$i] =~ /^0([0-7]+)$/) {
+      my $val = substr($1, -12);
+      $n = Math::BigInt->from_oct('0' . $val);
+    } elsif ($parts[$i] =~ /^(\d+)$/) {
+      my $val = substr($1, -11);
+      $n = Math::BigInt->new($val);
+    } else {
+      return undef;
+    }
+    if ($n->bcmp(255) > 0) {
+      if ($i < $#parts) {
+        $n->band(0xff);
+        push(@ip, $n->bstr);
+      } else {
+        my $started = 0;
+        my $max = 0xffffffff;
+        if ($n->bcmp($max) > 0) {
+          $n->band($max);
+          $started = 1;
+        }
+        $n = int($n->bstr);
+        my $shift;
+        for ($shift = 24; $shift >= 0 and @ip < 4; $shift -= 8) {
+          my $byte = ($n >> $shift) & 0xff;
+          if ($byte == 0 and not $started) {
+            next;
+          } else {
+            $started = 1;
+          }
+          push(@ip, sprintf('%u', $byte));
+        }
+        if ($shift >= 0) {
+          return undef;
+        }
+      }
+    } else {
+      push(@ip, sprintf('%u', $n->bstr));
+    }
+  }
+  while (@ip < 4) {
+    push(@ip, '0');
+  }
+  return join('.', @ip);
 }
 
 sub new {
@@ -173,11 +231,6 @@ a string representing the URI to check
 
 =cut
 
-##
-# Take a URI string and return the canonicalized de-suffixed/de-prefixed
-# substring that matched the blocklist if a match was made. Return undef
-# otherwise. See http://code.google.com/apis/safebrowsing/developers_guide.html.
-#
 sub suffix_prefix_match {
   my Net::Google::SafeBrowsing::Blocklist $self = shift;
   my ($uristr) = @_;
@@ -194,12 +247,20 @@ sub suffix_prefix_match {
     return undef;
   }
   my $host = URI::Escape::uri_escape($uri->host);
-  my @host_parts = grep({$_ ne ''} split(/\./, $host));
+  my $ip = canonicalized_ip($host);
+  my @host_parts;
+  if (defined($ip)) {
+    push(@host_parts, $ip);
+  } else {
+    @host_parts = split(/\.+/, $host);
+  }
   my $max_hosts = 5;
-  if (@host_parts - 1 < $max_hosts) {
+  if (defined($ip)) {
+    $max_hosts = 1;
+  } elsif (@host_parts - 1 < $max_hosts) {
     $max_hosts = @host_parts - 1;
   }
-  if (length($host_parts[$#host_parts]) == 2) {
+  if (not defined($ip) and length($host_parts[$#host_parts]) == 2) {
     --$max_hosts;
   }
   my @segments = $uri->path_segments;

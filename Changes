@@ -1,5 +1,8 @@
 Revision history for Net-Google-SafeBrowsing-Blocklist
 
+1.02    2007/08/02
+        Added IP address canonicalization
+
 1.01    2007/08/01
         First version
 
