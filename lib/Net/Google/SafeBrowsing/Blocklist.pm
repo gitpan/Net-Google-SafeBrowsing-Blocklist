@@ -56,8 +56,9 @@ use URI;
 use URI::Escape;
 use File::stat;
 use Math::BigInt 1.87;
+use Time::HiRes;
 use Exporter;
-our $VERSION = '1.02';
+our $VERSION = '1.03';
 our @ISA = qw(Exporter);
 
 our $MAJORVERSION  = '__MAJOR__';
@@ -180,7 +181,7 @@ sub maybe_reopen_db {
 }
 
 sub l {
-  print STDERR @_, "\n";
+#print STDERR @_, "\n";
 }
 
 sub blocklist {
@@ -210,7 +211,6 @@ sub wrappedkey {
 sub check_uri {
   my Net::Google::SafeBrowsing::Blocklist $self = shift;
   my ($uristr) = @_;
-  l("Checking URI: '$uristr'");
   my $dig = Digest::MD5::md5($uristr);
   return exists($self->{db}->{$dig});
 }
@@ -234,6 +234,25 @@ a string representing the URI to check
 sub suffix_prefix_match {
   my Net::Google::SafeBrowsing::Blocklist $self = shift;
   my ($uristr) = @_;
+  my @checked_uris;
+  my $start = Time::HiRes::time();
+  my $matched = $self->suffix_prefix_match_internal($uristr, \@checked_uris);
+  my $stop = Time::HiRes::time();
+  l("URIs checked:\n", join("\n", @checked_uris), "\n",
+    sprintf("Checked %d URIs in %.6f seconds.",
+            scalar(@checked_uris), $stop - $start));
+  return $matched;
+}
+
+sub suffix_prefix_match_internal {
+  my Net::Google::SafeBrowsing::Blocklist $self = shift;
+  my ($uristr, $checked_uris) = @_;
+
+  my $store_check_uri = sub {
+    push(@{$checked_uris}, $_[0]);
+    return $self->check_uri($_[0]);
+  };
+  
   if (not $self->maybe_reopen_db) {
     return undef;
   }
@@ -295,7 +314,8 @@ sub suffix_prefix_match {
     my $p = join('', @path);
     if (defined($qry)) {
       my $uristr = $h . $p . '?' . $qry;
-      if ($self->check_uri($uristr)) {
+      if ($store_check_uri->($uristr)) {
+        my $method_stop_time = Timer::HiRes::time();
         return $uristr;
       }
     }
@@ -305,7 +325,7 @@ sub suffix_prefix_match {
         $p .= $path[$k];
       }
       my $uristr = $h . $p;
-      if ($self->check_uri($uristr)) {
+      if ($store_check_uri->($uristr)) {
         return $uristr;
       }
     }

@@ -1,5 +1,9 @@
 Revision history for Net-Google-SafeBrowsing-Blocklist
 
+1.03    2007/08/03
+        Added URI lookup timing
+        Fixed tests
+
 1.02    2007/08/02
         Added IP address canonicalization
 
