@@ -1,4 +1,4 @@
-#   Copyright 2007 Daniel Born
+#   Copyright 2007 Daniel Born <danborn@cpan.org>
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ use File::stat;
 use Math::BigInt 1.87;
 use Time::HiRes;
 use Exporter;
-our $VERSION = '1.03';
+our $VERSION = '1.04';
 our @ISA = qw(Exporter);
 
 our $MAJORVERSION  = '__MAJOR__';
@@ -244,6 +244,44 @@ sub suffix_prefix_match {
   return $matched;
 }
 
+sub canonicalized_http_uri {
+  my ($uristr, $ip, $host_parts, $path, $qry) = @_;
+  my $uri = escaped_uri($uristr);
+  if (not (defined($uri->scheme) and
+           ($uri->scheme eq 'http' or $uri->scheme eq 'https'))) {
+    return 0;
+  }
+  my $host = URI::Escape::uri_escape($uri->host);
+  ${$ip} = canonicalized_ip($host);
+  if (defined(${$ip})) {
+    @{$host_parts} = (${$ip},);
+  } else {
+    @{$host_parts} = grep({$_ ne ''} split(/\.+/, $host));
+  }
+  my @segments = $uri->path_segments;
+  for (my $i = 0; $i < @segments; ++$i) {
+    $segments[$i] = URI::Escape::uri_escape($segments[$i]);
+    if ($segments[$i] eq '..') {
+      if (@{$path} > 1) {
+        pop(@{$path});
+      }
+    } elsif ($segments[$i] eq '.') {
+      next;
+    } elsif ($i > 0 and $segments[$i] eq '') {
+      next;
+    } else {
+      if ($i == 0 or $i < $#segments) {
+        $segments[$i] .= '/';
+      }
+      push(@{$path}, $segments[$i]);
+    }
+  }
+  if ($uri->query) {
+    ${$qry} = $uri->query;
+  }
+  return 1;
+}
+
 sub suffix_prefix_match_internal {
   my Net::Google::SafeBrowsing::Blocklist $self = shift;
   my ($uristr, $checked_uris) = @_;
@@ -252,7 +290,7 @@ sub suffix_prefix_match_internal {
     push(@{$checked_uris}, $_[0]);
     return $self->check_uri($_[0]);
   };
-  
+
   if (not $self->maybe_reopen_db) {
     return undef;
   }
@@ -260,18 +298,9 @@ sub suffix_prefix_match_internal {
     warn "Matched failed because timestamp too old: ", $self->timestamp;
     return undef;
   }
-  my $uri = escaped_uri($uristr);
-  if (not (defined($uri->scheme) and
-           ($uri->scheme eq 'http' or $uri->scheme eq 'https'))) {
+  my ($ip, @host_parts, @path, $qry);
+  if (not canonicalized_http_uri($uristr, \$ip, \@host_parts, \@path, \$qry)) {
     return undef;
-  }
-  my $host = URI::Escape::uri_escape($uri->host);
-  my $ip = canonicalized_ip($host);
-  my @host_parts;
-  if (defined($ip)) {
-    push(@host_parts, $ip);
-  } else {
-    @host_parts = split(/\.+/, $host);
   }
   my $max_hosts = 5;
   if (defined($ip)) {
@@ -282,29 +311,6 @@ sub suffix_prefix_match_internal {
   if (not defined($ip) and length($host_parts[$#host_parts]) == 2) {
     --$max_hosts;
   }
-  my @segments = $uri->path_segments;
-  my @path;
-  for (my $i = 0; $i < @segments; ++$i) {
-    $segments[$i] = URI::Escape::uri_escape($segments[$i]);
-    if ($segments[$i] eq '..') {
-      if (@path > 1) {
-        pop(@path);
-      }
-    } elsif ($segments[$i] eq '.') {
-      next;
-    } elsif ($i > 0 and $segments[$i] eq '') {
-      next;
-    } else {
-      if ($i == 0 or $i < $#segments) {
-        $segments[$i] .= '/';
-      }
-      push(@path, $segments[$i]);
-    }
-  }
-  my $qry;
-  if ($uri->query) {
-    $qry = $uri->query;
-  }
   my $max_paths = 5;
   if (@path < $max_paths) {
     $max_paths = @path;
@@ -313,10 +319,10 @@ sub suffix_prefix_match_internal {
     my $h = join('.', @host_parts);
     my $p = join('', @path);
     if (defined($qry)) {
-      my $uristr = $h . $p . '?' . $qry;
-      if ($store_check_uri->($uristr)) {
+      my $u = $h . $p . '?' . $qry;
+      if ($store_check_uri->($u)) {
         my $method_stop_time = Timer::HiRes::time();
-        return $uristr;
+        return $u;
       }
     }
     for (my $j = 0; $j < $max_paths; ++$j) {
@@ -324,9 +330,9 @@ sub suffix_prefix_match_internal {
       for (my $k = 0; $k < @path - $j; ++$k) {
         $p .= $path[$k];
       }
-      my $uristr = $h . $p;
-      if ($store_check_uri->($uristr)) {
-        return $uristr;
+      my $u = $h . $p;
+      if ($store_check_uri->($u)) {
+        return $u;
       }
     }
   }

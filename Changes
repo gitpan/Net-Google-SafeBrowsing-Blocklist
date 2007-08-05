@@ -1,5 +1,8 @@
 Revision history for Net-Google-SafeBrowsing-Blocklist
 
+1.04    2007/08/05
+        Fixed tests and Makefile.PL
+
 1.03    2007/08/03
         Added URI lookup timing
         Fixed tests

@@ -1,11 +1,21 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         Net-Google-SafeBrowsing-Blocklist
-version:      1.03
+version:      1.04
 version_from: lib/Net/Google/SafeBrowsing/Blocklist.pm
 installdirs:  site
 requires:
+    DB_File:                       0
+    Digest::MD5:                   0
+    Exporter:                      0
+    fields:                        0
+    File::stat:                    0
+    Math::BigInt:                  1.87
     Test::More:                    0
+    Test::Pod:                     0
+    Time::HiRes:                   0
+    URI:                           0
+    URI::Escape:                   0
 
 distribution_type: module
 generated_by: ExtUtils::MakeMaker version 6.17

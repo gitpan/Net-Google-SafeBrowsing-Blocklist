@@ -5,5 +5,5 @@ Makefile.PL
 README
 lib/Net/Google/SafeBrowsing/Blocklist.pm
 t/00-load.t
-t/boilerplate.t
+t/01-canonicalization.t
 t/pod.t
